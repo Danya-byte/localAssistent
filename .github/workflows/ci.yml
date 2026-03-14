@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t .
+
+      - name: Build portable app
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
+
+      - name: Smoke launch packaged app
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\smoke.ps1

@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t .
+
+      - name: Build release package
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
+
+      - name: Smoke launch packaged app
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\smoke.ps1
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalAssistant-release
+          path: |
+            dist/LocalAssistantSetup.exe
+            release/LocalAssistant-win64.zip
+            release/LocalAssistant-win64.sha256.txt
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/LocalAssistantSetup.exe
+            release/LocalAssistant-win64.zip
+            release/LocalAssistant-win64.sha256.txt
