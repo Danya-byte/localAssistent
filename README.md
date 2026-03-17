@@ -2,10 +2,7 @@
 
 Lightweight Windows-first desktop assistant built with Python and `PySide6`.
 
-The app is provider-agnostic: the UI is not tied to one model family or one runtime. A user can switch provider, model, and interface language in the app. In the current implementation the built-in adapters are:
-
-- `Ollama` for local models
-- `OpenAI-compatible` endpoints for hosted or self-hosted APIs
+The current product flow is local-first through `llama.cpp` and open-source Qwen GGUF models. The app manages a curated local model catalog, supports one-click model download, and asks for explicit approval before any external action.
 
 Assistant actions are separated from model inference. If the model asks to open a page, read/write a file, or run an allowed command, the app shows a blocking approval card. Nothing is executed until the user explicitly clicks allow.
 
@@ -13,12 +10,14 @@ Assistant actions are separated from model inference. If the model asks to open 
 
 - Liquid-glass Qt desktop UI with conversation history
 - RU/EN interface with manual in-app switch
-- Provider + model selection
+- Curated local Qwen model catalog with lightweight and powerful options
+- Background local model downloads with floating progress status
 - Streaming responses
 - Persistent SQLite storage for chats, settings, and pending actions
 - Action approval flow for web, file, and command operations
 - Export conversation to Markdown or JSON
-- Portable build, liquid-glass installer, and ZIP release packaging for Windows
+- Portable build and Windows installer
+- Release checksums and release manifest for installer/runtime verification
 
 ## Local development
 
@@ -43,23 +42,26 @@ Or:
 .\scripts\run.ps1
 ```
 
-### 3. Configure a provider
+### 3. Prepare local runtime
 
-Option A, local runtime with Ollama:
+Open the Profile page in the app and:
 
-```powershell
-ollama serve
-ollama pull qwen2.5:7b
-```
-
-Option B, OpenAI-compatible endpoint:
-
-Set `Base URL` and optional `API Key` in the application settings.
+1. Choose a local model
+2. Press `Install`
+3. Wait for the download to finish
+4. The app starts the bundled local runtime automatically
+5. Press `Refresh` only if the app asks you to retry the local runtime status
 
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -t .
+.\scripts\test.ps1
+```
+
+Coverage gate:
+
+```powershell
+.\scripts\coverage.ps1
 ```
 
 ## Build
@@ -85,28 +87,38 @@ Full release package:
 .\scripts\package.ps1
 ```
 
+Verify release artifacts:
+
+```powershell
+.\scripts\verify_release.ps1
+```
+
 This produces:
 
 - `dist\LocalAssistant\` portable bundle
-- `dist\LocalAssistantSetup.exe` liquid-glass installer
+- `dist\LocalAssistantSetup.exe` installer
+- `release\LocalAssistant-manifest.json` trusted release manifest
+- `release\LocalAssistantSetup.sha256.txt` installer checksum
 - `release\LocalAssistant-win64.zip` archive with the installer inside
+- `release\LocalAssistant-win64.sha256.txt` ZIP checksum
 
 ## GitHub automation
 
-- `CI` workflow runs tests, portable build, and a headless startup smoke check on every push and pull request.
-- `Release` workflow runs on tags like `v0.1.0`, builds the installer and ZIP release, and publishes release artifacts to GitHub.
+- `CI` workflow runs compile checks, the full test suite, a strict `100%` coverage gate, portable build, and a headless startup smoke check on every push and pull request.
+- `Release` workflow runs on tags like `v0.2.0`, but it cannot publish artifacts unless compile checks, tests, the `100%` coverage gate, build, smoke, and package steps all pass.
 
 ## Community files
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 - [`SECURITY.md`](SECURITY.md)
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 
 ## Architecture
 
-- `src/local_assistant/providers/`: provider adapters and registry
+- `src/local_assistant/providers/`: local runtime adapter and registry
 - `src/local_assistant/actions/`: action parsing and safe execution
-- `src/local_assistant/services/chat_service.py`: orchestration for chat, actions, and exports
+- `src/local_assistant/services/chat_service.py`: orchestration for chat, local models, actions, and exports
 - `src/local_assistant/storage.py`: SQLite persistence
 - `src/local_assistant/ui/main_window.py`: desktop shell, localization, approval flow
 
@@ -119,3 +131,11 @@ Override with:
 ```powershell
 $env:LOCAL_ASSISTANT_HOME = "C:\path\to\custom-home"
 ```
+
+Logs are written to `%APPDATA%\LocalAssistant\logs\app.log` by default.
+
+## Update recovery
+
+- If the app cannot repair or self-update, open `%APPDATA%\LocalAssistant\logs\app.log` and review the latest installer or manifest error.
+- The chat UI and local model flow should continue working even when a trusted release manifest is unavailable.
+- Public releases must include `LocalAssistantSetup.exe`, `LocalAssistantPatch.zip`, and `LocalAssistant-manifest.json` as one verified set.

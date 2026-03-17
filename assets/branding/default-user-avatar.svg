@@ -1,0 +1,26 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="avatar-circle">
+      <circle cx="64" cy="64" r="64" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#avatar-circle)">
+    <rect width="128" height="128" fill="#575757" />
+    <path d="M0 108H18V92H24V108H42V84H50V108H70V88H80V108H98V78H106V108H128V128H0V108Z" fill="#404040" />
+    <circle cx="64" cy="54" r="28" fill="#FCFCFB" />
+    <path d="M39 38L51 26L55 44L39 50V38Z" fill="#0E0E10" />
+    <path d="M89 38L77 26L73 44L89 50V38Z" fill="#0E0E10" />
+    <path d="M34 60L45 48H59L52 69L37 73L27 66L34 60Z" fill="#060607" />
+    <path d="M94 60L83 48H69L76 69L91 73L101 66L94 60Z" fill="#060607" />
+    <path d="M59 26L64 18L69 26L73 44H55L59 26Z" fill="#0A0A0C" />
+    <path d="M55 73L64 82L73 73L69 61H59L55 73Z" fill="#222327" />
+    <path d="M59 79L64 85L69 79L64 76L59 79Z" fill="#0F1012" />
+    <ellipse cx="49" cy="58" rx="6" ry="3" fill="#F5F5F2" />
+    <ellipse cx="79" cy="58" rx="6" ry="3" fill="#F5F5F2" />
+    <circle cx="49" cy="58" r="1.6" fill="#111114" />
+    <circle cx="79" cy="58" r="1.6" fill="#111114" />
+    <path d="M61 84L64 87L67 84V96H61V84Z" fill="#15161A" />
+    <path d="M38 105C41 88 51 78 64 78C77 78 87 88 90 105H38Z" fill="#5A4038" />
+    <path d="M49 82L58 88H70L79 82L74 76H54L49 82Z" fill="#B49758" />
+  </g>
+</svg>

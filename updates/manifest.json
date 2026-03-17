@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "app_version": "0.1.0",
+  "runtime_version": "llama.cpp-b4179",
+  "update_kind": "installer",
+  "installer_asset_name": "LocalAssistantSetup.exe",
+  "installer_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "patch_asset_name": "LocalAssistantPatch.zip",
+  "patch_bundle_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "runtime_bundle_sha256": "0403ea421840c91b1e20d6b78ed1b05ba6354f12aa4d76cc81c998b9ac6e2164",
+  "runtime_files": {
+    "ggml-base.dll": "31d16587fab2ecf2a1c1b5449fe78f756f51715110e0d3d3ec06f56125c8b6f2",
+    "ggml-cpu.dll": "285b93f12d41406a8d1da7b0c00a961b6d73a442051d4225c2fbde1d4cf85cdc",
+    "ggml-rpc.dll": "367662603d54c778992abaddf7092f20e9ff56951909410dcf240c4fb6aae979",
+    "ggml.dll": "7725f92c8f7509213cd4b9bca2512473b3ee2578329929b1fafd0e58717e7e97",
+    "llama-server.exe": "c45efe30435005aaa3cc471cfc4b603a6a4687239ba24c5b1fef2a26d0ed3ad2",
+    "llama.cpp.txt": "173fa96d2bc8be3fc3a29f98ae2a10d3bdcaafbbb66cd358110b863da71f9591",
+    "llama.dll": "d25183ec653c7c267d2e4db2f6d7efdccc0d1d81d9df5ccb249dbfa164261b27",
+    "llava_shared.dll": "8c05de22dc4fe67cbbb3332b592c1f3fb6fadb8c74dbf39ae9b3eb7ba2c12562"
+  },
+  "installer_source_url": "",
+  "patch_bundle_url": "",
+  "runtime_source_url": "https://github.com/ggml-org/llama.cpp",
+  "requires_runtime_replace": true,
+  "min_supported_from_version": "",
+  "patched_files": []
+}

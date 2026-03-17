@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-assistant-desktop"
-version = "0.1.0"
-description = "Lightweight Windows desktop assistant with pluggable model providers and explicit action approvals."
+dynamic = ["version"]
+description = "Lightweight Windows desktop assistant with local models and explicit action approvals."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "coverage[toml]>=7.6,<8",
   "PyInstaller>=6.11,<7",
 ]
 
@@ -37,8 +38,21 @@ local-assistant = "local_assistant.__main__:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 
+[tool.setuptools.dynamic]
+version = { file = ["VERSION.txt"] }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/local_assistant", "src/launcher.py"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = false
+precision = 0

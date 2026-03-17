@@ -1,5 +1,9 @@
 """Provider-agnostic local desktop assistant."""
 
-from .app import run
-
 __all__ = ["run"]
+
+
+def run() -> None:
+    from .app import run as _run
+
+    _run()

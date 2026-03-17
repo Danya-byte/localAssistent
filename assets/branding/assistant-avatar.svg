@@ -1,0 +1,28 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D8ECFF"/>
+      <stop offset="1" stop-color="#8FC2F8"/>
+    </linearGradient>
+    <linearGradient id="coat" x1="42" y1="69" x2="90" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#244260"/>
+      <stop offset="1" stop-color="#11263F"/>
+    </linearGradient>
+    <linearGradient id="neck" x1="54" y1="44" x2="78" y2="76" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8D8C5"/>
+      <stop offset="1" stop-color="#E4B499"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="64" fill="url(#bg)"/>
+  <circle cx="64" cy="48" r="24" fill="#F3D7C8"/>
+  <path d="M46 42C48 27 59 21 64 21C73 21 82 28 83 42C76 37 71 35 64 35C57 35 51 37 46 42Z" fill="#203955"/>
+  <path d="M55 60C58 62 61 63 64 63C67 63 71 62 73 60" stroke="#9B5E45" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="55" cy="50" r="3" fill="#203955"/>
+  <circle cx="73" cy="50" r="3" fill="#203955"/>
+  <path d="M46 68C48 56 55 49 64 49C73 49 80 56 82 68V72H46V68Z" fill="url(#neck)"/>
+  <path d="M34 116C36 91 48 75 64 75C80 75 92 91 94 116H34Z" fill="url(#coat)"/>
+  <path d="M53 76H75L82 116H46L53 76Z" fill="#F8FBFF" fill-opacity="0.94"/>
+  <path d="M61 76H67V116H61V76Z" fill="#8FC2F8"/>
+  <circle cx="64" cy="91" r="4" fill="#244260"/>
+  <circle cx="64" cy="103" r="4" fill="#244260"/>
+</svg>

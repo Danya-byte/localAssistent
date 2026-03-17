@@ -4,7 +4,12 @@ from abc import ABC, abstractmethod
 from threading import Event
 from typing import Iterator
 
-from ..models import GenerationRequest, ModelDescriptor, ProviderDescriptor, ProviderHealth
+from ..models import (
+    GenerationRequest,
+    ModelDescriptor,
+    ProviderDescriptor,
+    ProviderHealth,
+)
 
 
 class ModelProvider(ABC):
@@ -21,3 +26,7 @@ class ModelProvider(ABC):
     @abstractmethod
     def stream_chat(self, request: GenerationRequest, cancel_event: Event) -> Iterator[str]:
         raise NotImplementedError
+
+    def pop_response_metadata(self, assistant_message_id: str) -> dict[str, object]:
+        _ = assistant_message_id
+        return {}
