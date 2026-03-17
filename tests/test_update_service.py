@@ -678,6 +678,77 @@ class UpdateServiceTests(unittest.TestCase):
         with patch("local_assistant.services.update_service.subprocess.run", side_effect=OSError):
             self.assertEqual(UpdateService._check_authenticode_status(Path("demo.exe")), "unknown")
 
+    def test_check_latest_release_and_prepare_paths_cover_remaining_errors(self) -> None:
+        service = UpdateService(manifest_path=Path("unused.json"))
+        service._fetch_json = lambda url: (["bad"], "")  # type: ignore[method-assign]
+        self.assertIn("invalid", service.check_latest_release().error)
+
+        service._fetch_json = lambda url: ({"tag_name": "", "html_url": "", "assets": []}, "")  # type: ignore[method-assign]
+        self.assertIn("missing", service.check_latest_release().error)
+
+        release_payload = {"tag_name": "v0.2.1", "html_url": "https://example.com/release", "assets": [{"name": "LocalAssistantSetup.exe", "browser_download_url": "https://example.com/setup.exe"}]}
+        service._fetch_json = lambda url: (release_payload, "")  # type: ignore[method-assign]
+        self.assertIn("missing or invalid", service.check_latest_release().error)
+
+        service = UpdateService(manifest_path=Path("unused.json"), cache_dir=None)
+        with self.assertRaisesRegex(RuntimeError, "Installer is not available"):
+            service.prepare_installer()
+        with self.assertRaisesRegex(RuntimeError, "Patch cache directory is not configured"):
+            service.prepare_patch()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            installer = root / "LocalAssistantSetup.exe"
+            installer.write_bytes(b"demo")
+            manifest_path = root / "LocalAssistant-manifest.json"
+            manifest_path.write_text(json.dumps(self._manifest_payload(installer_sha256=UpdateService._sha256_file(installer))), encoding="utf-8")
+            service = UpdateService(manifest_path=Path("unused.json"), cache_dir=root)
+            service._check_authenticode_status = lambda path: "unsigned"  # type: ignore[method-assign]
+            with (
+                patch("local_assistant.services.update_service.application_root", return_value=root),
+            ):
+                self.assertEqual(service.find_local_installer(), installer)
+                plan = service.prepare_installer(prefer_latest=False)
+            self.assertEqual(plan.source, "local")
+
+            bad_manifest = root / "LocalAssistant-manifest.json"
+            bad_manifest.write_text(json.dumps(self._manifest_payload(installer_sha256="", patch_bundle_sha256="1" * 64)), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "invalid installer_sha256"):
+                service.prepare_installer(installer_url="https://example.com/setup.exe", manifest_url="", prefer_latest=True)
+
+            patch_manifest = root / "LocalAssistant-manifest.json"
+            patch_manifest.write_text(json.dumps(self._manifest_payload(update_kind="installer", installer_sha256="a" * 64)), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "installer update path"):
+                service.prepare_patch("https://example.com/patch.zip", "", current_version="0.2.0")
+
+            patch_manifest.write_text(
+                json.dumps(self._manifest_payload(update_kind="patch", requires_runtime_replace=True, installer_sha256="a" * 64, patch_bundle_sha256="1" * 64, patched_files=["LocalAssistant.exe"])),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "cannot require runtime replacement"):
+                service.prepare_patch("https://example.com/patch.zip", "", current_version="0.2.0")
+
+            patch_manifest.write_text(
+                json.dumps(self._manifest_payload(update_kind="patch", requires_runtime_replace=False, min_supported_from_version="0.3.0", installer_sha256="a" * 64, patch_bundle_sha256="1" * 64, patched_files=["LocalAssistant.exe"])),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "does not support"):
+                service.prepare_patch("https://example.com/patch.zip", "", current_version="0.2.0")
+
+            patch_manifest.write_text(
+                json.dumps(self._manifest_payload(update_kind="patch", requires_runtime_replace=False, patch_bundle_url="", installer_sha256="a" * 64, patch_bundle_sha256="1" * 64, patched_files=["LocalAssistant.exe"])),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "not available"):
+                service.prepare_patch("", "", current_version="0.2.0")
+
+            patch_manifest.write_text(
+                json.dumps(self._manifest_payload(update_kind="patch", requires_runtime_replace=False, installer_sha256="a" * 64, patch_bundle_sha256="bad", patched_files=["LocalAssistant.exe"])),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "invalid patch_bundle_sha256"):
+                service.prepare_patch("https://example.com/patch.zip", "", current_version="0.2.0")
+
 
 if __name__ == "__main__":
     unittest.main()

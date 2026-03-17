@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,9 +9,10 @@ from threading import Event
 from tests._support import PROJECT_ROOT  # noqa: F401
 
 from local_assistant.config import DEFAULT_MODEL
-from local_assistant.models import GenerationRequest, InstalledLocalModel, ModelDescriptor, ProviderDescriptor, ProviderHealth
+from local_assistant.exceptions import ProviderError
+from local_assistant.models import AssistantAction, GenerationRequest, InstalledLocalModel, ModelDescriptor, ProviderDescriptor, ProviderHealth
 from local_assistant.services import ChatService
-from local_assistant.services.update_service import ReleaseCheck, RuntimeManifest, UpdateService
+from local_assistant.services.update_service import PatchLaunchPlan, ReleaseCheck, RuntimeManifest, UpdateService
 from local_assistant.storage import Storage
 
 
@@ -80,6 +82,15 @@ class FakeUpdateService(UpdateService):
 
     def launch_installer(self, installer_path: Path) -> None:
         self.launched_installer = installer_path
+
+    def prepare_patch(self, patch_url: str = "", manifest_url: str = "", *, current_version: str = ""):
+        _ = patch_url
+        _ = manifest_url
+        _ = current_version
+        return PatchLaunchPlan(patch_path=Path("C:/temp/LocalAssistantPatch.zip"), source="downloaded")
+
+    def launch_patch_updater(self, patch_path: Path, *, current_pid: int) -> None:
+        self.launched_patch = (patch_path, current_pid)
 
 
 class FakeRuntimeService:
@@ -550,6 +561,183 @@ class ChatServiceTests(unittest.TestCase):
         self.assertEqual(self.service.set_last_conversation(prepared.conversation.conversation_id).last_conversation_id, prepared.conversation.conversation_id)
         self.assertTrue(self.service._derive_title("a" * 80).endswith("..."))  # noqa: SLF001
         self.assertEqual(self.service._resolve_provider_and_model(self.service.load_settings())[0], "local_llama")  # noqa: SLF001
+
+    def test_chat_service_runtime_patch_remove_and_export_helpers(self) -> None:
+        update_service = self.service.update_service
+        self.service.storage.save_release_state(
+            {
+                "latest_version": "0.2.1",
+                "patch_url": "https://example.com/LocalAssistantPatch.zip",
+                "manifest_url": "https://example.com/LocalAssistant-manifest.json",
+                "update_kind": "patch",
+                "patch_available": True,
+            }
+        )
+        plan = self.service.prepare_patch_handoff()
+        self.assertEqual(plan.patch_path, Path("C:/temp/LocalAssistantPatch.zip"))
+        self.service.launch_patch_update(Path("C:/temp/LocalAssistantPatch.zip"), current_pid=55)
+        self.assertEqual(update_service.launched_patch, (Path("C:/temp/LocalAssistantPatch.zip"), 55))
+        self.service.launch_installer(Path("C:/temp/LocalAssistantSetup.exe"))
+        self.assertEqual(update_service.launched_installer, Path("C:/temp/LocalAssistantSetup.exe"))
+
+        self.service.storage.save_installed_model(
+            InstalledLocalModel(
+                model_id="other-model",
+                file_path="C:/models/other.gguf",
+                file_name="other.gguf",
+                source="hf",
+                downloaded_at="2026-03-16T00:00:00+00:00",
+                size_bytes=123,
+            )
+        )
+        self.service.storage.save_installed_model(
+            InstalledLocalModel(
+                model_id=DEFAULT_MODEL,
+                file_path="C:/models/default.gguf",
+                file_name="default.gguf",
+                source="hf",
+                downloaded_at="2026-03-16T00:00:00+00:00",
+                size_bytes=123,
+            )
+        )
+        removed: list[object] = []
+        stopped: list[str] = []
+        self.service.download_service = type("Download", (), {"remove": lambda _self, item: removed.append(item)})()
+        self.service.runtime_service = type("Runtime", (), {"stop": lambda _self: stopped.append("stopped")})()
+        settings = self.service.load_settings()
+        settings.model = DEFAULT_MODEL
+        self.service.save_settings(settings)
+        self.service.remove_local_model(DEFAULT_MODEL)
+        self.assertEqual(stopped, ["stopped"])
+        self.assertEqual(self.service.load_settings().model, "other-model")
+        self.assertEqual(getattr(removed[0], "model_id", None), DEFAULT_MODEL)
+
+        prepared = self.service.prepare_user_generation(None, "Export this.")
+        self.service.finalize_message(prepared.assistant_message.message_id)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            md_path = Path(temp_dir) / "chat.md"
+            json_path = Path(temp_dir) / "chat.json"
+            self.service.export_conversation_markdown(prepared.conversation.conversation_id, md_path)
+            self.service.export_conversation_json(prepared.conversation.conversation_id, json_path)
+            self.assertIn("# ", md_path.read_text(encoding="utf-8"))
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["conversation_id"], prepared.conversation.conversation_id)
+            self.assertGreaterEqual(len(payload["messages"]), 2)
+
+    def test_chat_service_runtime_health_language_and_prompt_helpers(self) -> None:
+        self.assertEqual(self.service._provider_config(self.service.load_settings(), "local_llama")["context_length"], "8192")  # noqa: SLF001
+        self.assertEqual(self.service.get_chat_source(None, "api"), "local")
+        conversation = self.service.storage.create_conversation("Title")
+        self.assertIsNone(self.service.set_conversation_source(conversation.conversation_id, "api").source_override)
+
+        self.service.storage.add_message(conversation.conversation_id, "user", "Hello", metadata={"detected_language": "en"})
+        self.assertEqual(self.service._resolve_conversation_language(conversation.conversation_id, "ru"), "en")  # noqa: SLF001
+        self.assertEqual(self.service._detect_message_language("12345", "ru", conversation.conversation_id), "en")  # noqa: SLF001
+        self.assertEqual(self.service._detect_message_language("12345", "ru"), "ru")  # noqa: SLF001
+        self.assertEqual(self.service._last_detected_user_language(conversation.conversation_id), "en")  # noqa: SLF001
+        self.assertIn("Respond only in English", self.service._language_lock_prompt("en"))  # noqa: SLF001
+        self.assertIn("ACTION_RESULT", self.service._format_action_summary(AssistantAction(None, "c", "m", "file_read", "Read", "desc", "note.txt", "medium", {"path": "note.txt"}, status="failed", error="boom")))  # noqa: SLF001
+        self.assertIn("System prompt", self.service._compose_system_prompt("System prompt", "en"))  # noqa: SLF001
+        self.assertTrue(self.service._invalid_action_fallback("conv"))  # noqa: SLF001
+
+        settings = self.service.load_settings()
+        settings.model = ""
+        self.service.save_settings(settings)
+        health = self.service.get_source_health()
+        self.assertEqual(health.status, "ready")
+        self.assertEqual(self.service.get_provider_health("local_llama", ""), ProviderHealth(status="missing_model", detail="missing model", models=[]))
+
+    def test_chat_service_prepare_and_parse_error_paths(self) -> None:
+        class MissingProviderRegistry(FakeRegistry):
+            def get(self, provider_id: str):
+                raise KeyError(provider_id)
+
+        broken_service = ChatService(
+            storage=Storage(Path(self.temp_dir.name) / "broken.sqlite3"),
+            providers=MissingProviderRegistry(),
+            update_service=FakeUpdateService(),
+        )
+        broken_service.initialize()
+        self.assertEqual(broken_service._refresh_local_runtime(), ("error", "", "", False, False, ""))  # noqa: SLF001
+
+        class MissingHealthProvider(FakeProvider):
+            def health_check(self, provider_config: dict[str, str], desired_model: str) -> ProviderHealth:
+                _ = provider_config
+                _ = desired_model
+                return ProviderHealth(status="missing_model", detail="need install", models=[])
+
+        registry = FakeRegistry()
+        registry.providers["local_llama"] = MissingHealthProvider()
+        health_service = ChatService(
+            storage=Storage(Path(self.temp_dir.name) / "health.sqlite3"),
+            providers=registry,
+            update_service=FakeUpdateService(),
+        )
+        health_service.initialize()
+        conv = health_service.storage.create_conversation("Need install")
+        with self.assertRaises(ProviderError):
+            health_service._prepare_assistant_generation(conv.conversation_id, health_service.load_settings())  # noqa: SLF001
+
+        message = health_service.storage.add_message(conv.conversation_id, "assistant", '<ACTION_REQUEST>{"kind":"web_request","title":"x","description":"y","target":"human-readable target","payload":{}}</ACTION_REQUEST>', status="completed")
+        action = health_service.parse_action_request(message.message_id)
+        self.assertIsNone(action)
+        updated = health_service.storage.get_message(message.message_id)
+        self.assertTrue(updated.content)  # type: ignore[union-attr]
+
+    def test_chat_service_refresh_runtime_release_error_and_provider_config_defaults(self) -> None:
+        self.service.update_service.release_check = ReleaseCheck(current_version="0.2.0", error="offline")
+        result = self.service.refresh_runtime_configuration()
+        self.assertEqual(result.status.last_check_status, "error")
+        self.assertEqual(result.error, "offline")
+
+        class NoDescriptorCatalog:
+            def get_model(self, model_id: str):
+                _ = model_id
+                return None
+
+            def list_models(self):
+                return []
+
+            def to_provider_models(self):
+                return []
+
+            def get_recommended_model(self):
+                return None
+
+        self.service.catalog_service = NoDescriptorCatalog()
+        self.assertEqual(self.service._provider_config(self.service.load_settings(), "local_llama")["context_length"], "8192")  # noqa: SLF001
+
+    def test_chat_service_refresh_local_runtime_error_branches(self) -> None:
+        self.service.storage.save_installed_model(
+            InstalledLocalModel(
+                model_id=DEFAULT_MODEL,
+                file_path="C:/models/qwen.gguf",
+                file_name="qwen.gguf",
+                source="hf",
+                downloaded_at="2026-03-16T00:00:00+00:00",
+                size_bytes=123,
+            )
+        )
+
+        self.service.runtime_service = FakeRuntimeService(binary_available=True, ensure_error="timed out")
+        status, detail, active_model_id, runtime_ready, repair_required, _reason = self.service._refresh_local_runtime()  # noqa: SLF001
+        self.assertEqual(status, "error")
+        self.assertFalse(runtime_ready)
+        self.assertTrue(repair_required)
+        self.assertEqual(active_model_id, DEFAULT_MODEL)
+        self.assertIn("timed out", detail)
+
+        self.service.runtime_service = type(
+            "Runtime",
+            (),
+            {
+                "verify_runtime_bundle": lambda _self: type("Verification", (), {"status": "invalid_bundle", "detail": "broken bundle"})(),
+                "ensure_runtime": lambda _self, _path, _ctx: None,
+            },
+        )()
+        status, detail, *_rest = self.service._refresh_local_runtime()  # noqa: SLF001
+        self.assertEqual(status, "error")
+        self.assertEqual(detail, "broken bundle")
 
 
 if __name__ == "__main__":

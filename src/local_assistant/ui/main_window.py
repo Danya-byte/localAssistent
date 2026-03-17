@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QDesktopServices, QFont, QPixmap
