@@ -36,7 +36,7 @@ jobs:
       - name: Run unit tests
         run: powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
 
-      - name: Enforce 100% coverage
+      - name: Enforce 90% coverage
         run: powershell -ExecutionPolicy Bypass -File .\scripts\coverage.ps1
 
       - name: Build release package

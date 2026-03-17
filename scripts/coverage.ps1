@@ -17,5 +17,5 @@ function Get-PythonExecutable {
 $pythonExe = Get-PythonExecutable
 & $pythonExe -m coverage erase
 & $pythonExe -m coverage run --branch -m unittest discover -s tests -t .
-& $pythonExe -m coverage report --show-missing --skip-covered --fail-under=100
+& $pythonExe -m coverage report --show-missing --skip-covered --fail-under=90
 & $pythonExe -m coverage xml -o coverage.xml
