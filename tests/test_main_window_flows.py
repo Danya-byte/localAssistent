@@ -12,12 +12,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QListWidgetItem, QMessageBox
+from PySide6.QtWidgets import QApplication, QComboBox, QListWidgetItem, QMessageBox
 
 from tests._support import PROJECT_ROOT  # noqa: F401
 
 from local_assistant.actions.executor import ActionExecutor
 from local_assistant.config import AppPaths
+from local_assistant.i18n import LocalizationManager
 from local_assistant.exceptions import ProviderError
 from local_assistant.models import (
     AssistantAction,
@@ -510,6 +511,337 @@ class MainWindowFlowTests(unittest.TestCase):
         self.window._update_interaction_state()  # noqa: SLF001
         self.assertTrue(self.window._is_locked())  # noqa: SLF001
 
+    def test_additional_main_window_branches(self) -> None:
+        with patch("local_assistant.ui.main_window.resolve_asset", return_value=Path("missing.png")):
+            self.window._apply_brand_art()  # noqa: SLF001
+
+        with patch("local_assistant.ui.main_window.QApplication.primaryScreen", return_value=None):
+            self.window._position_window()  # noqa: SLF001
+
+        self.window.service.list_models = Mock(side_effect=RuntimeError("no models"))  # type: ignore[method-assign]
+        self.window._cached_provider_models = []  # noqa: SLF001
+        self.window._populate_models()  # noqa: SLF001
+        self.assertGreaterEqual(self.window.model_combo.count(), 1)
+
+        descriptor = LocalModelDescriptor(
+            model_id="demo-model",
+            display_name="Demo",
+            description="Desc",
+            source="hf",
+            download_url="https://example.com/demo.gguf",
+            file_name="demo.gguf",
+            size_hint="1 MB",
+            quantization="Q4",
+            recommended_ram_gb=8,
+            context_length=4096,
+        )
+        self.window._cached_local_models = [descriptor]  # noqa: SLF001
+        self.window.settings.model = "demo-model"
+        self.window._populate_local_models()  # noqa: SLF001
+        self.assertIn("1 MB", self.window.local_model_combo.itemText(0))
+        self.assertIn("RAM: 8 GB+", self.window.local_model_combo.itemData(0, Qt.ItemDataRole.ToolTipRole))
+
+        self.assertEqual(self.window._format_conversation_timestamp("bad"), "")  # noqa: SLF001
+
+        installed = InstalledLocalModel(
+            model_id="demo-model",
+            file_path="C:/models/demo.gguf",
+            file_name="demo.gguf",
+            source="hf",
+            downloaded_at="2026-03-17T00:00:00+00:00",
+            size_bytes=10,
+        )
+        self.window._cached_installed_models = {"demo-model": installed}  # noqa: SLF001
+        self.window._runtime_binary_available = False  # noqa: SLF001
+        self.window.current_health = ProviderHealth(status="error", detail="offline")
+        self.window._refresh_local_model_status()  # noqa: SLF001
+        self.assertIn("runtime", self.window.local_model_status_value.text().lower())
+        self.window.runtime_refresh_worker = object()  # type: ignore[assignment]
+        self.window._runtime_binary_available = True  # noqa: SLF001
+        self.window._refresh_local_model_status()  # noqa: SLF001
+        self.assertNotEqual(self.window.local_model_status_value.text(), "")
+        self.window.runtime_refresh_worker = None
+
+        self.window.service.remove_local_model = Mock(side_effect=RuntimeError("remove failed"))  # type: ignore[method-assign]
+        with patch.object(self.window, "_show_error") as show_error:
+            self.window._remove_selected_local_model()  # noqa: SLF001
+        show_error.assert_called_once()
+
+        self.window.settings.last_conversation_id = None
+        self.window.service.load_messages = lambda _cid: []  # type: ignore[method-assign]
+        with patch.object(self.window, "_render_messages") as render_messages:
+            self.window._restore_last_conversation()  # noqa: SLF001
+        render_messages.assert_called_once()
+
+        self.window.local_model_combo.clear()
+        self.window.local_model_combo.addItem("Demo", "demo-model")
+        self.window.model_combo.clear()
+        self.window.model_combo.addItem("Other", "other-model")
+        with (
+            patch.object(self.window, "_persist_settings") as persist,
+            patch.object(self.window, "_refresh_local_model_status") as refresh_local,
+            patch.object(self.window, "_refresh_health_banner") as refresh_banner,
+        ):
+            self.window._handle_local_model_change()  # noqa: SLF001
+        persist.assert_called_once()
+        refresh_local.assert_called_once()
+        refresh_banner.assert_called_once()
+
+        with (
+            patch.object(LocalizationManager, "set_language") as set_language,
+            patch.object(self.window, "_persist_settings") as persist,
+            patch.object(self.window, "_retranslate_ui") as retranslate,
+            patch.object(self.window, "_refresh_health_banner") as refresh_banner,
+        ):
+            self.window._handle_language_change()  # noqa: SLF001
+        set_language.assert_called_once()
+        persist.assert_called_once()
+        retranslate.assert_called_once()
+        refresh_banner.assert_called_once()
+
+        self.window.current_conversation_id = "c1"
+        self.window.service.load_messages = lambda _cid: []  # type: ignore[method-assign]
+        with (
+            patch.object(self.window, "sender", return_value=object()),
+            patch.object(self.window, "_apply_theme") as apply_theme,
+            patch.object(self.window, "_populate_theme_choices") as populate_choices,
+            patch.object(self.window, "_persist_settings") as persist,
+            patch.object(self.window, "_update_nav_state") as update_nav,
+            patch.object(self.window, "_render_messages") as render_messages,
+        ):
+            self.window._handle_theme_change()  # noqa: SLF001
+        apply_theme.assert_called_once()
+        populate_choices.assert_called_once()
+        persist.assert_called_once()
+        update_nav.assert_called_once()
+        render_messages.assert_called_once()
+
+        self.window.composer.setPlainText("   ")
+        self.window.current_health = ProviderHealth(status="ready", detail="ok")
+        with patch.object(self.window.service, "prepare_user_generation", side_effect=AssertionError("should not be called")):
+            self.window._send_message()  # noqa: SLF001
+        self.window.composer.setPlainText("hello")
+        self.window.service.prepare_user_generation = Mock(side_effect=RuntimeError("send failed"))  # type: ignore[method-assign]
+        with patch.object(self.window, "_show_error") as show_error:
+            self.window._send_message()  # noqa: SLF001
+        show_error.assert_called_once()
+
+        self.window.current_assistant_message_id = None
+        self.window._handle_generation_chunk("chunk")  # noqa: SLF001
+        self.window.current_assistant_message_id = "m1"
+        self.window.current_conversation_id = None
+        with patch.object(self.window.service, "append_to_message") as append_to_message:
+            self.window._handle_generation_chunk("chunk")  # noqa: SLF001
+        append_to_message.assert_called_once()
+
+        self.window.current_assistant_message_id = "m1"
+        with patch.object(self.window.service, "update_message_metadata") as update_metadata:
+            self.window._handle_generation_metadata({})
+            self.window._handle_generation_metadata("bad")
+            self.window._handle_generation_metadata({"ok": True})
+        update_metadata.assert_called_once_with("m1", {"ok": True})
+
+        self.window.current_assistant_message_id = "m1"
+        self.window.current_conversation_id = "c1"
+        self.window.service.parse_action_request = Mock(return_value=None)  # type: ignore[method-assign]
+        self.window.service.load_messages = lambda _cid: []  # type: ignore[method-assign]
+        with (
+            patch.object(self.window.service, "finalize_message"),
+            patch.object(self.window, "_render_messages"),
+            patch.object(self.window, "_populate_conversations"),
+            patch.object(self.window, "_notify") as notify,
+            patch.object(self.window, "_refresh_activity_chip") as refresh_chip,
+        ):
+            self.window._handle_generation_completed()  # noqa: SLF001
+        notify.assert_called_once()
+        refresh_chip.assert_called_once_with("ready")
+
+        action = AssistantAction(
+            action_id="a2",
+            conversation_id="c1",
+            assistant_message_id="m1",
+            kind="command_run",
+            title="Run",
+            description="Run command",
+            target="echo hi",
+            risk="medium",
+            payload={"command": "echo hi"},
+        )
+        self.window.service.parse_action_request = Mock(return_value=action)  # type: ignore[method-assign]
+        with (
+            patch.object(self.window.service, "finalize_message"),
+            patch.object(self.window.service, "mark_action_denied", return_value=action),
+            patch.object(self.window, "_render_messages"),
+            patch.object(self.window, "_populate_conversations"),
+            patch.object(self.window, "_show_approval_sheet", return_value=False),
+            patch.object(self.window, "_notify") as notify,
+            patch.object(self.window, "_continue_after_action") as continue_after,
+        ):
+            self.window._handle_generation_completed()  # noqa: SLF001
+        notify.assert_called_once()
+        continue_after.assert_called_once()
+
+        self.window.current_assistant_message_id = None
+        self.window._handle_generation_completed()  # noqa: SLF001
+
+        self.window.current_assistant_message_id = None
+        with patch.object(self.window, "_show_error") as show_error:
+            self.window._handle_generation_failed("boom", cancelled=False)  # noqa: SLF001
+        show_error.assert_called_once()
+        with patch.object(self.window, "_notify") as notify:
+            self.window._handle_generation_failed("cancelled", cancelled=True)  # noqa: SLF001
+        notify.assert_called_once()
+
+        self.window.generation_worker = None
+        self.window._cancel_generation()  # noqa: SLF001
+        self.window.pending_action_id = "a1"
+        self.window.action_worker = object()  # type: ignore[assignment]
+        self.window._allow_pending_action()  # noqa: SLF001
+        self.window._deny_pending_action()  # noqa: SLF001
+        self.window.action_worker = None
+        self.window.service.get_action = lambda _aid: None  # type: ignore[method-assign]
+        self.window._allow_pending_action()  # noqa: SLF001
+
+        self.window.service.build_action_follow_up = Mock(side_effect=RuntimeError("follow-up failed"))  # type: ignore[method-assign]
+        with patch.object(self.window, "_show_error") as show_error:
+            self.window._continue_after_action(action)  # noqa: SLF001
+        show_error.assert_called_once()
+
+        self.window.runtime_refresh_worker = object()  # type: ignore[assignment]
+        self.window._start_runtime_refresh(manual=True)  # noqa: SLF001
+        self.window.runtime_refresh_worker = None
+        self.window._handle_runtime_refresh_completed(object())  # noqa: SLF001
+
+        with patch.object(self.window, "_finish_event") as finish_event:
+            self.window._handle_runtime_refresh_completed(
+                RuntimeRefreshResult(
+                    status=RuntimeStatus(current_version="0.2.0"),
+                    local_status="missing_runtime",
+                    local_detail="",
+                    runtime_ready=False,
+                    provider_health=ProviderHealth(status="missing_runtime", detail="runtime missing"),
+                )
+            )  # noqa: SLF001
+            self.window._handle_runtime_refresh_completed(
+                RuntimeRefreshResult(
+                    status=RuntimeStatus(current_version="0.2.0"),
+                    local_status="error",
+                    local_detail="timed out",
+                    runtime_ready=False,
+                    provider_health=ProviderHealth(status="error", detail="timed out"),
+                )
+            )  # noqa: SLF001
+        self.assertGreaterEqual(finish_event.call_count, 2)
+
+        self.window.runtime_status.latest_version = "0.2.1"
+        self.window._installer_prompt_token = "patch:0.2.1"  # noqa: SLF001
+        with patch.object(self.window, "_start_patch_handoff") as start_patch:
+            self.window._maybe_prompt_installer_handoff(
+                RuntimeRefreshResult(
+                    status=RuntimeStatus(current_version="0.2.0", latest_version="0.2.1"),
+                    update_available=True,
+                    update_kind="patch",
+                    patch_available=True,
+                )
+            )  # noqa: SLF001
+        start_patch.assert_not_called()
+
+        self.window._installer_prompt_token = None  # noqa: SLF001
+        with patch("local_assistant.ui.main_window.SheetDialog") as dialog_cls:
+            dialog_cls.return_value.DialogCode.Accepted = 1
+            dialog_cls.return_value.exec.return_value = 0
+            with patch.object(self.window, "_start_installer_handoff") as start_installer:
+                self.window._maybe_prompt_installer_handoff(
+                    RuntimeRefreshResult(
+                        status=RuntimeStatus(current_version="0.2.0", latest_version="0.2.2"),
+                        update_available=True,
+                        installer_available=True,
+                    )
+                )  # noqa: SLF001
+            start_installer.assert_not_called()
+
+        self.window.installer_worker = object()  # type: ignore[assignment]
+        with patch.object(self.window, "_notify") as notify:
+            self.window._start_patch_handoff()  # noqa: SLF001
+        notify.assert_called_once()
+        self.window.installer_worker = None
+
+        self.window.runtime_status = RuntimeStatus(current_version="0.2.0", last_check_status="error", last_check_error="bad")
+        self.assertIn("bad", self.window._runtime_status_text())  # noqa: SLF001
+
+        with (
+            patch("local_assistant.ui.main_window.QMenu") as menu_cls,
+            patch("local_assistant.ui.main_window.QDesktopServices.openUrl") as open_url,
+        ):
+            menu = menu_cls.return_value
+            developer_action = object()
+            github_action = object()
+            menu.addAction.side_effect = [developer_action, github_action]
+            menu.exec.return_value = developer_action
+            self.window._open_support_menu()  # noqa: SLF001
+        open_url.assert_called_once()
+
+        self.window._health_snapshot_valid = True  # noqa: SLF001
+        self.window.current_health = ProviderHealth(status="missing_model", detail="not installed")
+        self.window._refresh_health_banner()  # noqa: SLF001
+        self.assertEqual(self.window.health_banner.objectName(), "HealthBannerWarning")
+
+        self.window.action_worker = object()  # type: ignore[assignment]
+        with patch.object(self.window, "_refresh_activity_chip") as refresh_chip:
+            self.window._apply_health(ProviderHealth(status="ready", detail="ok"))  # noqa: SLF001
+        refresh_chip.assert_called_once_with("busy")
+        self.window.action_worker = None
+
+        self.window.current_conversation_id = "c1"
+        with patch("local_assistant.ui.main_window.QFileDialog.getSaveFileName", return_value=(str(self.paths.exports_dir / "out.json"), "")):
+            with (
+                patch.object(self.window.service, "export_conversation_json", side_effect=RuntimeError("export failed")),
+                patch.object(self.window, "_show_error") as show_error,
+            ):
+                self.window._export_current("json")  # noqa: SLF001
+        show_error.assert_called_once()
+
+        self.window.model_combo.clear()
+        self.window.model_combo.setEditable(True)
+        self.window.model_combo.setCurrentText("fallback-model")
+        self.assertEqual(self.window._selected_model_id(), "fallback-model")  # noqa: SLF001
+        self.window.theme_combo.setCurrentIndex(-1)
+        self.assertEqual(self.window._selected_theme(), self.window.settings.theme)  # noqa: SLF001
+
+        with patch("local_assistant.ui.main_window.QApplication.instance", return_value=None):
+            self.window._apply_theme("dark")  # noqa: SLF001
+
+        self.assertEqual(self.window._consumer_health_detail(ProviderHealth(status="error", detail="")), "")  # noqa: SLF001
+
+        with (
+            patch.object(self.window, "_show_message_box") as show_message_box,
+            patch("local_assistant.ui.main_window.LOGGER") as logger,
+        ):
+            self.window._show_error("Oops", RuntimeError("boom"))  # noqa: SLF001
+        logger.exception.assert_called_once()
+        show_message_box.assert_called_once()
+
+        with patch.object(self.window.notification_center, "show_alert") as show_alert:
+            self.window._notify("Hi", "There", variant="success", timeout_ms=123)  # noqa: SLF001
+        show_alert.assert_called_once()
+
+        fake_thread = Mock()
+        fake_worker = Mock()
+        fake_event = Mock()
+        self.window.generation_worker = fake_worker  # type: ignore[assignment]
+        self.window.generation_thread = fake_thread  # type: ignore[assignment]
+        self.window.action_thread = fake_thread  # type: ignore[assignment]
+        self.window.runtime_refresh_thread = fake_thread  # type: ignore[assignment]
+        self.window.installer_thread = fake_thread  # type: ignore[assignment]
+        self.window.model_download_worker = fake_worker  # type: ignore[assignment]
+        self.window.model_download_thread = fake_thread  # type: ignore[assignment]
+        with patch.object(self.window.service.runtime_service, "stop") as stop_runtime:
+            self.window.closeEvent(fake_event)  # noqa: SLF001
+        self.assertTrue(fake_worker.cancel.called)
+        self.assertTrue(fake_thread.quit.called)
+        stop_runtime.assert_called_once()
+        fake_event.accept.assert_called_once()
+
     def test_ui_helper_population_and_branding_methods(self) -> None:
         self.window._apply_icons()  # noqa: SLF001
         self.assertFalse(self.window.send_button.icon().isNull())
@@ -725,3 +1057,151 @@ class MainWindowFlowTests(unittest.TestCase):
         ):
             self.window._start_installer_handoff(prefer_latest=True)  # noqa: SLF001
         installer_thread.start.assert_called_once()
+
+    def test_main_window_misc_state_scroll_and_profile_helpers(self) -> None:
+        self.window._refresh_secret_status()  # noqa: SLF001
+        self.assertEqual(self.window._notification_label("Hide"), self.window._t("button_hide"))  # noqa: SLF001
+        self.assertEqual(self.window._notification_label("Custom"), "Custom")  # noqa: SLF001
+        self.assertEqual(self.window._model_download_event_id("  "), "model-download:active")  # noqa: SLF001
+        self.assertEqual(self.window._role_label("assistant"), self.window._t("role_assistant"))  # noqa: SLF001
+        self.assertEqual(self.window._localized_action_kind("command_run"), self.window._t("action_command_run"))  # noqa: SLF001
+        self.assertEqual(self.window._localized_risk("high"), self.window._t("risk_high"))  # noqa: SLF001
+        self.assertEqual(self.window._selected_provider_id(), "local_llama")  # noqa: SLF001
+        self.assertEqual(self.window._selected_default_source(), "local")  # noqa: SLF001
+        self.assertEqual(self.window._selected_chat_source(), "local")  # noqa: SLF001
+        self.assertEqual(self.window._current_chat_source(), "local")  # noqa: SLF001
+
+        self.window.model_combo.clear()
+        self.window.model_combo.setEditable(True)
+        self.window.model_combo.addItem("Demo", "demo-model")
+        self.window.model_combo.setCurrentIndex(0)
+        self.assertEqual(self.window._selected_model_id(), "demo-model")  # noqa: SLF001
+        self.assertEqual(self.window._selected_model_label(), "Demo")  # noqa: SLF001
+        self.assertEqual(self.window._model_display_name("demo-model"), "Demo")  # noqa: SLF001
+
+        editable = QComboBox()
+        editable.setEditable(True)
+        self.window._set_combo_by_data(editable, "custom")  # noqa: SLF001
+        self.assertEqual(editable.currentText(), "custom")
+
+        self.window.current_health = ProviderHealth(status="ready", detail="ok")
+        self.window._set_workspace("profile")  # noqa: SLF001
+        self.assertEqual(self.window._workspace, "profile")
+        self.assertTrue(self.window._header_context_text())  # noqa: SLF001
+        self.window._set_workspace("chat")  # noqa: SLF001
+        self.window._update_nav_state()  # noqa: SLF001
+
+        with patch("local_assistant.ui.main_window.build_stylesheet", return_value="QWidget{}"):
+            self.window._apply_theme("dark")  # noqa: SLF001
+        self.assertEqual(self.window.settings.theme, "dark")
+
+        self.window._chat_pinned_to_bottom = True  # noqa: SLF001
+        self.window._scroll_chat_to_bottom_if_pinned(True)  # noqa: SLF001
+        self.window._handle_chat_scroll(self.window.chat_view.verticalScrollBar().maximum())  # noqa: SLF001
+        self.window._handle_chat_composer_geometry_changed()  # noqa: SLF001
+        self.window._restore_chat_scroll(0)  # noqa: SLF001
+        self.window._typing_indicator_message_id = "m1"  # noqa: SLF001
+        self.window.current_conversation_id = None
+        self.window._advance_typing_indicator()  # noqa: SLF001
+        self.assertEqual(self.window._typing_indicator_text(), "Typing.")  # noqa: SLF001
+        self.window._stop_typing_indicator()  # noqa: SLF001
+
+        self.window.current_health = ProviderHealth(status="missing_runtime", detail="runtime binary missing")
+        self.assertTrue(self.window._profile_status_text())  # noqa: SLF001
+        self.assertTrue(self.window._consumer_health_detail(self.window.current_health))  # noqa: SLF001
+        self.assertTrue(self.window._append_health_detail("Body", "Detail"))  # noqa: SLF001
+        self.assertEqual(self.window._append_health_detail("Body", "Body"), "Body")  # noqa: SLF001
+        self.assertEqual(self.window._provider_display_name("local_llama"), "Local Qwen")  # noqa: SLF001
+        self.assertEqual(self.window._provider_id_for_source("local"), "local_llama")  # noqa: SLF001
+        self.assertTrue(self.window._model_name_for_source("local"))  # noqa: SLF001
+        self.assertTrue(self.window._provider_description("local_llama"))  # noqa: SLF001
+        self.assertTrue(self.window._setup_guidance_for_health("local_llama", self.window.current_health, "Demo"))  # noqa: SLF001
+        self.window._populate_setup_guidance(self.window.current_health)  # noqa: SLF001
+
+    def test_main_window_install_remove_persist_and_close_helpers(self) -> None:
+        self.window.local_model_combo.clear()
+        self.window.local_model_combo.addItem("Demo", "demo-model")
+        self.window.model_combo.clear()
+        self.window.model_combo.addItem("Demo", "demo-model")
+        self.window.local_model_combo.setCurrentIndex(0)
+
+        self.window.service.get_installed_local_model = lambda _model_id: object()  # type: ignore[method-assign]
+        with patch.object(self.window, "_open_selected_local_model_chat") as open_chat:
+            self.window._install_selected_local_model()  # noqa: SLF001
+        open_chat.assert_called_once()
+
+        self.window.service.get_installed_local_model = lambda _model_id: None  # type: ignore[method-assign]
+        self.window.model_download_worker = object()  # type: ignore[assignment]
+        with patch.object(self.window, "_notify") as notify:
+            self.window._install_selected_local_model()  # noqa: SLF001
+        notify.assert_called_once()
+        self.window.model_download_worker = None
+
+        signal = lambda: SimpleNamespace(connect=Mock())  # noqa: E731
+        download_thread = Mock()
+        download_thread.started = signal()
+        download_thread.finished = signal()
+        download_worker = Mock()
+        download_worker.progress = signal()
+        download_worker.completed = signal()
+        download_worker.failed = signal()
+        download_worker.finished = signal()
+        with (
+            patch("local_assistant.ui.main_window.QThread", return_value=download_thread),
+            patch("local_assistant.ui.main_window.ModelDownloadWorker", return_value=download_worker),
+            patch.object(self.window, "_show_event"),
+        ):
+            self.window._install_selected_local_model()  # noqa: SLF001
+        download_thread.start.assert_called_once()
+
+        self.window.current_health = ProviderHealth(status="ready", detail="ok")
+        with patch.object(self.window.composer, "setFocus") as set_focus:
+            self.window._open_selected_local_model_chat()  # noqa: SLF001
+        set_focus.assert_called_once()
+        self.window.current_health = ProviderHealth(status="missing_model", detail="missing")
+        with (
+            patch.object(self.window, "_refresh_health_banner"),
+            patch.object(self.window, "_notify") as notify,
+        ):
+            self.window._open_selected_local_model_chat()  # noqa: SLF001
+        notify.assert_called_once()
+
+        self.window.model_download_worker = object()  # type: ignore[assignment]
+        self.window._remove_selected_local_model()  # noqa: SLF001
+        self.window.model_download_worker = None
+        self.window.service.remove_local_model = Mock()  # type: ignore[method-assign]
+        self.window.service.list_installed_local_models = lambda: []  # type: ignore[method-assign]
+        with (
+            patch.object(self.window, "_notify"),
+            patch.object(self.window, "_refresh_local_model_status"),
+            patch.object(self.window, "_refresh_health_banner"),
+        ):
+            self.window._remove_selected_local_model()  # noqa: SLF001
+        self.window.service.remove_local_model.assert_called_once()  # type: ignore[attr-defined]
+
+        settings = self.window._collect_settings_from_form()  # noqa: SLF001
+        self.assertEqual(settings.provider_id, "local_llama")
+        self.assertTrue(isinstance(settings.command_allowlist, list))
+
+        with patch.object(self.window.service, "save_settings", side_effect=RuntimeError("persist failed")):
+            with patch.object(self.window, "_show_error") as show_error:
+                self.window._persist_settings()  # noqa: SLF001
+        show_error.assert_called_once()
+
+        self.window._is_closing = True  # noqa: SLF001
+        with patch.object(self.window.service, "save_settings") as save_settings:
+            self.window._persist_settings()  # noqa: SLF001
+        save_settings.assert_not_called()
+        self.window._is_closing = False  # noqa: SLF001
+
+        self.window.settings.last_conversation_id = None
+        with patch.object(self.window, "_render_messages") as render_messages:
+            self.window._restore_last_conversation()  # noqa: SLF001
+        render_messages.assert_called()
+
+        self.assertEqual(self.window._normalize_update_error("Trusted release manifest is not available"), self.window._t("update_error_manifest_unavailable"))  # noqa: SLF001
+        self.assertEqual(self.window._normalize_update_error("signature is invalid"), self.window._t("update_error_signature_invalid"))  # noqa: SLF001
+
+        event = Mock()
+        self.window.closeEvent(event)  # noqa: SLF001
+        event.accept.assert_called_once()
