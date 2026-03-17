@@ -147,11 +147,14 @@ class LocalRuntimeService:
                 resolve_asset("runtime", LOCAL_RUNTIME_BINARY_NAME),
             ]
         )
+
         unique: list[Path] = []
+        seen: set[Path] = set()
         for candidate in candidates:
             resolved = candidate.resolve()
-            if resolved not in unique:
-                unique.append(resolved)
+            if resolved not in seen:
+                seen.add(resolved)
+                unique.append(candidate)
         return unique
 
     @staticmethod

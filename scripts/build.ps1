@@ -21,6 +21,8 @@ function Assert-Path([string]$path, [string]$message) {
 }
 
 function Test-FlatRuntimeBundle([string]$runtimeRoot) {
+    Assert-Path $runtimeRoot "Runtime directory is missing: runtime\"
+
     $requiredFiles = @(
         "llama-server.exe",
         "llama.dll",
@@ -31,11 +33,21 @@ function Test-FlatRuntimeBundle([string]$runtimeRoot) {
         "llava_shared.dll",
         "llama.cpp.txt"
     )
+
+    $missingFiles = @()
     foreach ($name in $requiredFiles) {
-        Assert-Path (Join-Path $runtimeRoot $name) "Required runtime file is missing: runtime\\$name"
+        $path = Join-Path $runtimeRoot $name
+        if (-not (Test-Path $path)) {
+            $missingFiles += $name
+        }
     }
 
-    $unexpectedExecutables = Get-ChildItem -Path $runtimeRoot -Filter *.exe -File | Where-Object { $_.Name -ne "llama-server.exe" }
+    if ($missingFiles.Count -gt 0) {
+        throw "Runtime bundle is incomplete. Missing files: $($missingFiles -join ', ')"
+    }
+
+    $unexpectedExecutables = Get-ChildItem -Path $runtimeRoot -Filter *.exe -File |
+        Where-Object { $_.Name -ne "llama-server.exe" }
     if ($unexpectedExecutables) {
         throw "Runtime bundle contains unexpected executables: $($unexpectedExecutables.Name -join ', ')"
     }
@@ -47,7 +59,7 @@ function Test-FlatRuntimeBundle([string]$runtimeRoot) {
 
     & (Join-Path $runtimeRoot "llama-server.exe") --help | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Bundled local runtime failed verification. Check the runtime bundle in runtime\\."
+        throw "Bundled local runtime failed verification. Check the runtime bundle in runtime\."
     }
 }
 
@@ -67,6 +79,7 @@ Assert-Path $iconPath "Brand icon not found at assets\branding\app.ico."
 Assert-Path $brandingPath "Brand assets not found at assets\branding."
 Assert-Path $photoPath "Photo assets not found at assets\photo."
 Assert-Path $modelsPath "Model catalog assets not found at assets\models."
+Assert-Path $runtimePath "Runtime directory not found at runtime\."
 Assert-Path $updatesPath "Runtime update assets not found at updates."
 Assert-Path $readmePath "README.md not found."
 Assert-Path $noticesPath "THIRD_PARTY_NOTICES.md not found."
@@ -106,7 +119,15 @@ New-Item -ItemType Directory -Force -Path "build\pyinstaller" | Out-Null
     --add-data "${versionPath};." `
     "src\launcher.py"
 
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller build failed with exit code $LASTEXITCODE."
+}
+
 $builtExe = Join-Path $projectRoot "build\pyinstaller\LocalAssistant\LocalAssistant.exe"
-$distExe = Join-Path $projectRoot "dist\LocalAssistant\LocalAssistant.exe"
-Assert-Path $builtExe "PyInstaller did not produce build\\pyinstaller\\LocalAssistant\\LocalAssistant.exe."
+$distDir = Join-Path $projectRoot "dist\LocalAssistant"
+$distExe = Join-Path $distDir "LocalAssistant.exe"
+
+Assert-Path $builtExe "PyInstaller did not produce build\pyinstaller\LocalAssistant\LocalAssistant.exe."
+
+New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 Copy-Item $builtExe $distExe -Force
