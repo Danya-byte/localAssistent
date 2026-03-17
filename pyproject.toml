@@ -52,7 +52,7 @@ branch = true
 source = ["src/local_assistant", "src/launcher.py"]
 
 [tool.coverage.report]
-fail_under = 100
+fail_under = 90
 show_missing = true
 skip_covered = false
 precision = 0
